@@ -17,7 +17,7 @@ You need to implement the following functions:
 """
 import torch
 from .base_model import BaseModel
-from . import networks
+from models.networks import networks
 
 
 class TemplateModel(BaseModel):
