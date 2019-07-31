@@ -1,6 +1,6 @@
 import torch
 from .base_model import BaseModel
-from models.networks import networks
+from models.networks import networks,losses
 
 
 class Pix2PixModel(BaseModel):
@@ -62,7 +62,7 @@ class Pix2PixModel(BaseModel):
 
         if self.isTrain:
             # define loss functions
-            self.criterionGAN = networks.GANLoss(opt.gan_mode).to(self.device)
+            self.criterionGAN = losses.GANLoss(opt.gan_mode).to(self.device)
             self.criterionL1 = torch.nn.L1Loss()
             # initialize optimizers; schedulers will be automatically created by function <BaseModel.setup>.
             self.optimizer_G = torch.optim.Adam(self.netG.parameters(), lr=opt.lr, betas=(opt.beta1, 0.999))

@@ -95,8 +95,6 @@ class GANModel(BaseModel):
         self.real = input['A'].to(self.device)
         self.image_paths = input['A_paths']
 
-        print(self.netG.module)
-
     def forward(self):
         """Run forward pass; called by both functions <optimize_parameters> and <test>."""
         self.z = self.z_dist.sample((self.opt.batch_size,))
