@@ -10,7 +10,7 @@ class TrainOptions(BaseOptions):
     def initialize(self, parser):
         parser = BaseOptions.initialize(self, parser)
         # visdom and HTML visualization parameters
-        parser.add_argument('--visualizers', type=list, default=["local","wandb","visdom"], help='visualizers to use. local | visdom | wandb')
+        parser.add_argument('--visualizers', type=list, default=["local","wandb"], help='visualizers to use. local | visdom | wandb')
         parser.add_argument('--display_freq', type=int, default=400, help='frequency of showing training results on screen')
         parser.add_argument('--update_html_freq', type=int, default=1000, help='frequency of saving training results to html')
         parser.add_argument('--print_freq', type=int, default=100, help='frequency of showing training results on console')
