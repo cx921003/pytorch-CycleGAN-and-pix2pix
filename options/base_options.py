@@ -1,10 +1,9 @@
 import argparse
 import os
-from util import util
+from util import util,visualizer
 import torch
 import models
 import data
-
 
 class BaseOptions():
     """This class defines options used during both training and test time.
@@ -80,6 +79,9 @@ class BaseOptions():
         dataset_name = opt.dataset_mode
         dataset_option_setter = data.get_option_setter(dataset_name)
         parser = dataset_option_setter(parser, self.isTrain)
+
+        # modify visualization-related parser options
+        parser = visualizer.Visualizer.modify_commandline_options(parser)
 
         # save and return the parser
         self.parser = parser

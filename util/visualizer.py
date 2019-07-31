@@ -48,51 +48,144 @@ def save_images(webpage, visuals, image_path, aspect_ratio=1.0, width=256):
         links.append(image_name)
     webpage.add_images(ims, txts, links, width=width)
 
-
 class Visualizer():
-    """This class includes several functions that can display/save images and print/save logging information.
+    @staticmethod
+    def modify_commandline_options(parser):
+        opt, _ = parser.parse_known_args()
+        for vis_name in opt.visualizers:
+            class_name = "Visualizer" + vis_name.capitalize()
+            parser = globals()[class_name].modify_commandline_options(parser)
 
-    It uses a Python library 'visdom' for display, and a Python library 'dominate' (wrapped in 'HTML') for creating HTML files with images.
+        return parser
+
+    def __init__(self, opt):
+        self.visualizer_list = []
+        for vis_name in opt.visualizers:
+            class_name = "Visualizer"+vis_name.capitalize()
+            visualizer = globals()[class_name](opt)
+            self.visualizer_list.append(visualizer)
+
+    def display_current_results(self, visuals, epoch, save_result):
+        """Display current results on visdom; save current results to an HTML file.
+
+            Parameters:
+                visuals (OrderedDict) - - dictionary of images to display or save
+                epoch (int) - - the current epoch
+                save_result (bool) - - if save the current results to an HTML file
+        """
+        for visualizer in self.visualizer_list:
+            visualizer.display_current_results(visuals,epoch,save_result)
+
+    def plot_current_losses(self, epoch, iters, counter_ratio, losses, t_comp, t_data):
+        """print current losses on console; also save the losses to the disk
+
+        Parameters:
+            epoch (int) -- current epoch
+            iters (int) -- current training iteration during this epoch (reset to 0 at the end of every epoch)
+            losses (OrderedDict) -- training losses stored in the format of (name, float) pairs
+            t_comp (float) -- computational time per data point (normalized by batch_size)
+            t_data (float) -- data loading time per data point (normalized by batch_size)
+        """
+        # losses: same format as |losses| of plot_current_losses
+        for visualizer in self.visualizer_list:
+            visualizer.plot_current_losses(epoch, iters, counter_ratio, losses, t_comp, t_data)
+
+
+class VisualizerLocal():
+    """This class stores the training results, images in HTML and losses in text file.
     """
+
+    @staticmethod
+    def modify_commandline_options(parser):
+        return parser
 
     def __init__(self, opt):
         """Initialize the Visualizer class
-
-        Parameters:
-            opt -- stores all the experiment flags; needs to be a subclass of BaseOptions
-        Step 1: Cache the training/test options
-        Step 2: connect to a visdom server
-        Step 3: create an HTML object for saveing HTML filters
-        Step 4: create a logging file to store training losses
         """
         self.opt = opt  # cache the option
-        self.display_id = opt.display_id
-        self.use_html = opt.isTrain and not opt.no_html
-        self.win_size = opt.display_winsize
         self.name = opt.name
-        self.port = opt.display_port
-        self.saved = False
-        if self.display_id > 0:  # connect to a visdom server given <display_port> and <display_server>
-            import visdom
-            self.ncols = opt.display_ncols
-            self.vis = visdom.Visdom(server=opt.display_server, port=opt.display_port, env=opt.display_env)
-            if not self.vis.check_connection():
-                self.create_visdom_connections()
+        self.win_size = opt.display_winsize
+        self.epoch = -1
+        self.web_dir = os.path.join(opt.checkpoints_dir, opt.name, 'web')
+        self.img_dir = os.path.join(self.web_dir, 'images')
+        print('create web directory %s...' % self.web_dir)
+        util.mkdirs([self.web_dir, self.img_dir])
 
-        if self.use_html:  # create an HTML object at <checkpoints_dir>/web/; images will be saved under <checkpoints_dir>/web/images/
-            self.web_dir = os.path.join(opt.checkpoints_dir, opt.name, 'web')
-            self.img_dir = os.path.join(self.web_dir, 'images')
-            print('create web directory %s...' % self.web_dir)
-            util.mkdirs([self.web_dir, self.img_dir])
         # create a logging file to store training losses
         self.log_name = os.path.join(opt.checkpoints_dir, opt.name, 'loss_log.txt')
         with open(self.log_name, "a") as log_file:
             now = time.strftime("%c")
             log_file.write('================ Training Loss (%s) ================\n' % now)
 
-    def reset(self):
-        """Reset the self.saved status"""
-        self.saved = False
+    def display_current_results(self, visuals, epoch, save_result):
+        if epoch <= self.epoch:
+            return
+
+        self.epoch = epoch
+        # save images to the disk
+        for label, image in visuals.items():
+            image_numpy = util.tensor2im(image)
+            img_path = os.path.join(self.img_dir, 'epoch%.3d_%s.png' % (epoch, label))
+            util.save_image(image_numpy, img_path)
+
+        # update website
+        webpage = html.HTML(self.web_dir, 'Experiment name = %s' % self.name, refresh=1)
+        for n in range(epoch, 0, -1):
+            webpage.add_header('epoch [%d]' % n)
+            ims, txts, links = [], [], []
+
+            for label, image_numpy in visuals.items():
+                image_numpy = util.tensor2im(image)
+                img_path = 'epoch%.3d_%s.png' % (n, label)
+                ims.append(img_path)
+                txts.append(label)
+                links.append(img_path)
+            webpage.add_images(ims, txts, links, width=self.win_size)
+        webpage.save()
+
+    # losses: same format as |losses| of plot_current_losses
+    def plot_current_losses(self, epoch, iters, counter_ratio, losses, t_comp, t_data):
+
+        message = '(epoch: %d, iters: %d, time: %.3f, data: %.3f) ' % (epoch, iters, t_comp, t_data)
+        for k, v in losses.items():
+            message += '%s: %.3f ' % (k, v)
+
+        print(message)  # print the message
+        with open(self.log_name, "a") as log_file:
+            log_file.write('%s\n' % message)  # save the message
+
+
+class VisualizerVisdom():
+    """This class includes several functions that can display/save images and print/save logging information.
+
+    It uses a Python library 'visdom' for display, and a Python library 'dominate' (wrapped in 'HTML') for creating HTML files with images.
+    """
+
+    @staticmethod
+    def modify_commandline_options(parser):
+        """add class specific arguments"""
+        parser.add_argument('--display_ncols', type=int, default=4,
+                            help='if positive, display all images in a single visdom web panel with certain number of images per row.')
+        parser.add_argument('--display_id', type=int, default=1, help='window id of the web display')
+        parser.add_argument('--display_server', type=str, default="http://localhost",
+                            help='visdom server of the web display')
+        parser.add_argument('--display_env', type=str, default='main',
+                            help='visdom display environment name (default is "main")')
+        parser.add_argument('--display_port', type=int, default=8097, help='visdom port of the web display')
+
+        return parser
+
+    def __init__(self, opt):
+        self.opt = opt  # cache the option
+        self.name = opt.name
+        self.display_id = opt.display_id
+        self.port = opt.display_port
+        if self.display_id > 0:  # connect to a visdom server given <display_port> and <display_server>
+            import visdom
+            self.ncols = opt.display_ncols
+            self.vis = visdom.Visdom(server=opt.display_server, port=opt.display_port, env=opt.display_env)
+            if not self.vis.check_connection():
+                self.create_visdom_connections()
 
     def create_visdom_connections(self):
         """If the program could not connect to Visdom server, this function will start a new server at port < self.port > """
@@ -102,13 +195,6 @@ class Visualizer():
         Popen(cmd, shell=True, stdout=PIPE, stderr=PIPE)
 
     def display_current_results(self, visuals, epoch, save_result):
-        """Display current results on visdom; save current results to an HTML file.
-
-        Parameters:
-            visuals (OrderedDict) - - dictionary of images to display or save
-            epoch (int) - - the current epoch
-            save_result (bool) - - if save the current results to an HTML file
-        """
         if self.display_id > 0:  # show images in the browser using visdom
             ncols = self.ncols
             if ncols > 0:        # show all the images in one visdom panel
@@ -159,37 +245,7 @@ class Visualizer():
                 except VisdomExceptionBase:
                     self.create_visdom_connections()
 
-        if self.use_html and (save_result or not self.saved):  # save images to an HTML file if they haven't been saved.
-            self.saved = True
-            # save images to the disk
-            for label, image in visuals.items():
-                image_numpy = util.tensor2im(image)
-                img_path = os.path.join(self.img_dir, 'epoch%.3d_%s.png' % (epoch, label))
-                util.save_image(image_numpy, img_path)
-
-            # update website
-            webpage = html.HTML(self.web_dir, 'Experiment name = %s' % self.name, refresh=1)
-            for n in range(epoch, 0, -1):
-                webpage.add_header('epoch [%d]' % n)
-                ims, txts, links = [], [], []
-
-                for label, image_numpy in visuals.items():
-                    image_numpy = util.tensor2im(image)
-                    img_path = 'epoch%.3d_%s.png' % (n, label)
-                    ims.append(img_path)
-                    txts.append(label)
-                    links.append(img_path)
-                webpage.add_images(ims, txts, links, width=self.win_size)
-            webpage.save()
-
-    def plot_current_losses(self, epoch, counter_ratio, losses):
-        """display the current losses on visdom display: dictionary of error labels and values
-
-        Parameters:
-            epoch (int)           -- current epoch
-            counter_ratio (float) -- progress (percentage) in the current epoch, between 0 to 1
-            losses (OrderedDict)  -- training losses stored in the format of (name, float) pairs
-        """
+    def plot_current_losses(self, epoch, iters, counter_ratio, losses, t_comp, t_data):
         if not hasattr(self, 'plot_data'):
             self.plot_data = {'X': [], 'Y': [], 'legend': list(losses.keys())}
         self.plot_data['X'].append(epoch + counter_ratio)
@@ -207,21 +263,28 @@ class Visualizer():
         except VisdomExceptionBase:
             self.create_visdom_connections()
 
-    # losses: same format as |losses| of plot_current_losses
-    def print_current_losses(self, epoch, iters, losses, t_comp, t_data):
-        """print current losses on console; also save the losses to the disk
 
-        Parameters:
-            epoch (int) -- current epoch
-            iters (int) -- current training iteration during this epoch (reset to 0 at the end of every epoch)
-            losses (OrderedDict) -- training losses stored in the format of (name, float) pairs
-            t_comp (float) -- computational time per data point (normalized by batch_size)
-            t_data (float) -- data loading time per data point (normalized by batch_size)
-        """
-        message = '(epoch: %d, iters: %d, time: %.3f, data: %.3f) ' % (epoch, iters, t_comp, t_data)
-        for k, v in losses.items():
-            message += '%s: %.3f ' % (k, v)
+class VisualizerWandb():
+    """This class includes several functions that can display/save images and print/save logging information.
 
-        print(message)  # print the message
-        with open(self.log_name, "a") as log_file:
-            log_file.write('%s\n' % message)  # save the message
+    It uses a Python library 'wandb' for display, and a Python library 'dominate' (wrapped in 'HTML') for creating HTML files with images.
+    """
+    @staticmethod
+    def modify_commandline_options(parser):
+        return parser
+
+    def __init__(self, opt):
+        self.opt = opt  # cache the option
+        self.name = opt.name
+        import wandb
+        wandb.init(project=self.name)
+        wandb.config.update(opt)
+        self.wandb = wandb
+
+    def display_current_results(self, visuals, epoch, save_result):
+        self.wandb.log(dict(
+            (key,self.wandb.Image(util.tensor2im(image_tensor)))
+            for key, image_tensor in visuals.items() ) )
+
+    def plot_current_losses(self, epoch, iters, counter_ratio, losses, t_comp, t_data):
+        self.wandb.log(losses)
